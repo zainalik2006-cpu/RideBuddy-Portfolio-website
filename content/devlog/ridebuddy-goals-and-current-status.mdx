@@ -1,0 +1,42 @@
+---
+title: "RideBuddy: Goal Statement + Current Status"
+date: "2026-02-12"
+tags: ["Project Setup", "IMU", "Raspberry Pi"]
+summary: "What I’m building with RideBuddy, why it matters, and where I’m at right now (IMU bring-up + clean sensor reads)."
+status: "build"
+featuredImage:
+---
+
+## Goal statement
+
+RideBuddy is a motorcycle telemetry + safety system I’m building to capture ride data and turn it into useful insights.
+The end goal is a compact Raspberry Pi setup that logs **IMU + GPS** data and uses **sensor fusion + event detection** to highlight things like lean angle, hard braking, rough road segments, and potential incidents.
+
+I want this to be both:
+- a real tool I can use on my own bike, and
+- a solid embedded/data engineering case study (hardware → data pipeline → analysis).
+
+## Where I am right now
+
+Right now I’m in the **bring-up phase**:
+- I have the **IMU wired up and communicating with the Pi**
+- I’m getting consistent sensor readings (accel/gyro/mag) and verifying they look sane
+- Next I’m focused on clean sampling + stable timestamps so the data is actually usable later
+
+## What I built
+
+- Basic IMU read loop (accel/gyro/mag)
+- Quick sanity checks (stationary readings, axis directions, noise level)
+- A simple log format so I can replay/debug later
+
+## What I learned
+
+- Getting “data” is easy — getting **reliable data** is the real work
+- Small issues (rate, units, drift, timing) matter *a lot* once you start doing fusion/event detection
+
+## Next steps
+
+1. Lock down sample rate + timestamping
+2. Add basic filtering (noise reduction)
+3. Start orientation/lean angle estimate (fusion v1)
+4. Bring in GPS logging and sync it with IMU timestamps
