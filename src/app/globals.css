@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-white text-surface-900 antialiased dark:bg-surface-950 dark:text-surface-100;
+  }
+
+  ::selection {
+    @apply bg-primary-200 dark:bg-primary-800;
+  }
+}
+
+@layer components {
+  .page-container {
+    @apply mx-auto max-w-6xl px-4 py-12 sm:px-6 lg:py-16;
+  }
+
+  .grid-pattern {
+    background-image: radial-gradient(
+      circle,
+      rgb(148 163 184 / 0.15) 1px,
+      transparent 1px
+    );
+    background-size: 24px 24px;
+  }
+
+  .dark .grid-pattern {
+    background-image: radial-gradient(
+      circle,
+      rgb(51 65 85 / 0.4) 1px,
+      transparent 1px
+    );
+  }
+}

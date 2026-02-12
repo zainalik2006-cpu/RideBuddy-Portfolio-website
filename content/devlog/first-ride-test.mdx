@@ -1,0 +1,95 @@
+---
+title: "First Ride Test: Metrics, Bugs, Next Steps"
+date: "2025-01-10"
+tags: ["Testing", "Ride Data", "GPS", "IMU", "Dashboard"]
+summary: "The first full integration test ride with all systems running — what worked, what broke, what the data revealed, and what's next."
+status: "build"
+---
+
+## What I Built
+
+After months of building individual components — IMU bring-up, GPS logging, sensor fusion, event detection — it was time to put everything together for a real ride test. All systems running simultaneously, logging to disk, processing in real-time.
+
+The test: a 25-minute ride through city streets and a brief highway section, covering about 18 km.
+
+## The Setup
+
+The hardware was mounted in the waterproof enclosure under the seat:
+
+- Raspberry Pi 4 running the full acquisition + fusion + detection pipeline
+- ICM-20948 IMU mounted rigidly inside the case, aligned with bike axes
+- GPS antenna on the tail with clear sky view
+- Powered from the motorcycle's accessory circuit via LM2596
+
+Boot sequence: systemd starts the pipeline automatically, waits for GPS fix (took about 45 seconds), then begins logging.
+
+## What Worked
+
+### Data Acquisition
+The pipeline ran for the entire 25-minute ride without crashing. 100Hz IMU data, 10Hz GPS data, all timestamped and synchronized. Total data size: about 12 MB for the CSV logs.
+
+### Sensor Fusion
+The complementary filter produced clean, stable lean angle estimates throughout the ride. City turns showed 15–25° lean angles, the highway on-ramp hit 32°.
+
+### Event Detection
+The system correctly detected:
+- **4 hard braking events** (all at intersections, confirmed by GPS speed drops)
+- **2 aggressive lean events** (both on curved on-ramps)
+- **0 crash events** (correct — no crashes occurred)
+
+<Callout type="result" title="Key Metrics">
+- Ride duration: 25 minutes, 18.2 km
+- Max speed: 105 km/h (highway)
+- Max lean angle: 32.4° (right)
+- Hard braking events: 4 (peak: 0.92g)
+- Aggressive lean events: 2 (peak: 32.4°)
+- Data points logged: ~150,000 IMU + ~15,000 GPS
+- Zero system errors during the ride
+</Callout>
+
+## What Broke
+
+### Bug 1: GPS Dropout in Tunnel
+A 200-meter tunnel on the route caused a complete GPS dropout for about 15 seconds. The code handled it gracefully (empty GPS fields in the log), but the post-ride dashboard showed a straight-line interpolation through the tunnel, which looked wrong.
+
+**Fix needed**: Dead reckoning using IMU during GPS dropout, or at minimum, marking the gap in the dashboard instead of interpolating.
+
+### Bug 2: Timestamp Jump on USB Power Dip
+At one point (probably when I cranked the throttle), there was a brief voltage dip that caused the Pi's system clock to hiccup — a single 200ms gap in the log. Didn't affect the ride, but it breaks assumptions in the sliding window event detector.
+
+**Fix needed**: Voltage monitoring via ADC, or a UPS HAT to buffer power dips.
+
+### Bug 3: CSV Write Latency Spike
+Around the 18-minute mark, there was a burst of 5ms+ write latencies on the microSD card. Probably the filesystem flushing. A few IMU samples were delayed but not lost (buffered in memory).
+
+**Fix needed**: Write to a ramdisk and flush to SD periodically, or use an SSD via USB.
+
+<Callout type="warning" title="Power Is Everything">
+The voltage dip bug is the scariest. An unclean shutdown due to power loss could corrupt the filesystem and lose the entire ride's data. A UPS HAT or at minimum a large capacitor on the 5V rail is essential before this goes on regular rides.
+</Callout>
+
+## Dashboard Preview
+
+The post-ride analysis script generates a dashboard with:
+
+- **Route map**: GPS track colored by speed (green → yellow → red)
+- **Time series**: Accel, gyro, lean angle, speed over time
+- **Event markers**: Vertical lines on the time series at each detected event
+- **Summary stats**: Total distance, duration, max speed, max lean, event counts
+
+The dashboard is built with Plotly/Dash and renders in the browser. It's functional but rough — needs layout polish and the ability to click events to zoom into that time window.
+
+## What I Learned
+
+- Integration testing reveals problems that unit testing can't. The power dip and SD write latency bugs only appear under real-world conditions.
+- The sensor fusion and event detection pipeline is solid. The core algorithms performed exactly as expected on real data.
+- Power reliability is the #1 infrastructure concern. Everything else is software-fixable.
+- Real ride data is much more interesting than bench data. Seeing your actual cornering forces and braking events mapped to GPS positions is genuinely useful.
+
+## Next Steps
+
+- Add power buffering (UPS HAT or supercapacitor)
+- Implement GPS dead reckoning during dropouts
+- Improve dashboard with event drill-down and comparison views
+- Run 5+ more test rides across different route types (city, highway, twisty roads)
+- Start thinking about alerting: what should happen when a crash is detected?

@@ -1,0 +1,140 @@
+---
+title: "Event Detection: Hard Braking & Lean Angle"
+date: "2024-12-08"
+tags: ["Event Detection", "Signal Processing", "Sensor Fusion", "Python"]
+summary: "Building heuristic event detectors for hard braking and aggressive lean angles using fused IMU data and sliding window feature extraction."
+status: "done"
+---
+
+## What I Built
+
+The event detection layer sits on top of the sensor fusion pipeline and identifies two types of riding events in real-time:
+
+1. **Hard braking** — sustained deceleration exceeding a threshold
+2. **Aggressive lean** — motorcycle lean angle exceeding a safe threshold
+
+These events are timestamped, logged with metadata (magnitude, duration), and flagged for post-ride review in the dashboard.
+
+## Architecture
+
+The detection pipeline processes fused data in a sliding window:
+
+```
+Fused IMU data (100Hz)
+    → Sliding window (1s = 100 samples)
+    → Feature extraction (peak, mean, duration above threshold)
+    → Heuristic classifier (threshold + holdoff)
+    → Event log
+```
+
+Each detector runs independently and produces events with:
+- Start timestamp
+- End timestamp
+- Peak value
+- Duration
+- Event type
+
+## Hard Braking Detector
+
+Hard braking shows up as sustained negative acceleration along the X axis (forward axis of the bike). I use the longitudinal acceleration from the fused orientation to account for the bike's pitch during braking.
+
+```python
+BRAKE_THRESHOLD = 0.8  # g (deceleration)
+BRAKE_MIN_DURATION = 0.3  # seconds
+BRAKE_HOLDOFF = 2.0  # seconds between events
+
+def detect_hard_braking(window, timestamps):
+    # window: array of longitudinal accel values (g)
+    above = [abs(a) > BRAKE_THRESHOLD for a in window]
+    if not any(above):
+        return None
+
+    start_idx = above.index(True)
+    end_idx = len(above) - 1 - above[::-1].index(True)
+    duration = timestamps[end_idx] - timestamps[start_idx]
+
+    if duration >= BRAKE_MIN_DURATION:
+        return {
+            'type': 'hard_braking',
+            'start': timestamps[start_idx],
+            'end': timestamps[end_idx],
+            'peak_g': max(abs(a) for a in window),
+            'duration': duration,
+        }
+    return None
+```
+
+<Callout type="note" title="Threshold Selection">
+0.8g was chosen based on motorcycle braking data — typical emergency braking produces 0.8–1.2g deceleration. Sport bikes can exceed 1.2g. The threshold can be tuned per bike type in the config file.
+</Callout>
+
+## Lean Angle Detector
+
+Aggressive lean detection uses the roll angle output from the complementary filter. Most street riders lean to 25–35°; track riders may hit 50–55°.
+
+```python
+LEAN_THRESHOLD = 40  # degrees
+LEAN_MIN_DURATION = 0.5  # seconds
+
+def detect_aggressive_lean(window, timestamps):
+    above = [abs(r) > LEAN_THRESHOLD for r in window]
+    if not any(above):
+        return None
+
+    start_idx = above.index(True)
+    end_idx = len(above) - 1 - above[::-1].index(True)
+    duration = timestamps[end_idx] - timestamps[start_idx]
+
+    if duration >= LEAN_MIN_DURATION:
+        return {
+            'type': 'aggressive_lean',
+            'start': timestamps[start_idx],
+            'end': timestamps[end_idx],
+            'peak_degrees': max(abs(r) for r in window),
+            'duration': duration,
+        }
+    return None
+```
+
+## Holdoff Logic
+
+To prevent a single event from generating multiple detections (e.g., a long hard braking event triggering repeatedly), each detector has a holdoff timer:
+
+```python
+last_brake_event = 0
+
+def process(timestamp, accel, roll):
+    if timestamp - last_brake_event > BRAKE_HOLDOFF:
+        event = detect_hard_braking(accel_window, time_window)
+        if event:
+            log_event(event)
+            last_brake_event = timestamp
+```
+
+<Callout type="warning" title="Edge Case">
+Very long braking events (>2s) get logged as a single event. If the rider modulates the brakes (pump braking), each pulse above threshold after the holdoff window generates a separate event. This is intentional — each pulse is a distinct safety-relevant moment.
+</Callout>
+
+## Testing
+
+I tested on bench data (simulated by tilting and shaking the IMU) and one real ride:
+
+- **Bench**: Simulated 0.9g deceleration by tilting the board quickly → correctly detected
+- **Bench**: Tilted to 45° and held → lean event detected at 45.2°
+- **Ride**: 12-minute city ride detected 3 hard braking events and 2 lean events. All visually confirmed in the dashboard replay.
+
+<Callout type="result" title="Result">
+Zero false positives on the test ride. All detected events matched actual aggressive maneuvers visible in the raw data. The 0.8g and 40° thresholds are conservative enough for street riding.
+</Callout>
+
+## What I Learned
+
+- Sliding window feature extraction is a clean abstraction for real-time event detection on time-series data.
+- Holdoff timers are essential to prevent event floods. Without them, a single braking event can generate 50+ detections.
+- Threshold-based heuristics are surprisingly effective when the signal is clean (which it is, thanks to the sensor fusion layer).
+
+## Next Steps
+
+- Build crash/incident detection (impact + stillness pattern)
+- Add severity scoring to events
+- Aggregate event statistics per ride for the dashboard
